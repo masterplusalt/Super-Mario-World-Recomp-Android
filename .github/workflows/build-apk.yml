@@ -1,0 +1,66 @@
+
+name: Build SuperSNES APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout SuperSNES
+        uses: actions/checkout@v4
+
+      - name: Checkout Snes9x source
+        uses: actions/checkout@v4
+        with:
+          repository: snes9xgit/snes9x
+          path: snes9x-src
+          submodules: recursive
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+
+      - name: Compile Snes9x core for arm64 Android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          make -j2 -C snes9x-src/libretro platform=unix-arm64 \
+            CC="$TOOLCHAIN/aarch64-linux-android24-clang" \
+            CXX="$TOOLCHAIN/aarch64-linux-android24-clang++" \
+            AR="$TOOLCHAIN/llvm-ar"
+          test -f snes9x-src/libretro/snes9x_libretro.so
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp snes9x-src/libretro/snes9x_libretro.so \
+            app/src/main/jniLibs/arm64-v8a/libsnes9x_libretro_android.so
+
+      - name: Download Gradle
+        run: |
+          curl -L --fail https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+
+      - name: Build debug APK
+        run: /tmp/gradle-8.9/bin/gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SuperSNES-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
